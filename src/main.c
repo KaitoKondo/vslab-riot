@@ -35,6 +35,8 @@
 #include "elect.h"
 
 void rescheduleInterval(void);
+void reschedThreshold(void);
+void reschedTimeout(void);
 bool is_addr_bigger(char *str1, char *str2);
 
 static msg_t _main_msg_queue[ELECT_NODES_NUM];
@@ -97,12 +99,16 @@ int setup(void)
     evtimer_init_msg(&evtimer);
     /* send initial `TICK` to start eventloop */
     msg_send(&interval_event.msg, main_pid);
+    /* send initial `TICK` to start eventloop */
+    msg_send(&leader_threshold_event.msg, main_pid);
     return 0;
 }
 
 int main(void)
 {
-    bool higherIP = false;
+    bool otherIPIsHigher = false;
+    bool firstRound = true;
+    int msgCounter = 0;
 
     /* this should be first */
     if (setup() != 0)
@@ -128,21 +134,24 @@ int main(void)
         {
         case ELECT_INTERVAL_EVENT:
             LOG_DEBUG("+ interval event.\n");
-            if (!higherIP)
+            if (!otherIPIsHigher)
             {
                 if (broadcast_id(&thisAddr) < 0)
                 {
                     printf("%s: failed\n", __func__);
                 }
             }
+            msgCounter = 0;
             rescheduleInterval();
             break;
         case ELECT_BROADCAST_EVENT:
             LOG_DEBUG("+ broadcast event, from [%s]\n", (char *)m.content.ptr);
             if (is_addr_bigger(thisAddrStr, (char *)m.content.ptr))
             {
-                higherIP = true;
+                puts("Es liegt nicht an dir, es liegt an mir, aber ich denke nicht das es zwischen uns klppt, ich habe jemand höheren gefunden.");
+                otherIPIsHigher = true;
             }
+            msgCounter++;
             break;
         case ELECT_LEADER_ALIVE_EVENT:
             LOG_DEBUG("+ leader event.\n");
@@ -170,9 +179,30 @@ int main(void)
             break;
         case ELECT_LEADER_THRESHOLD_EVENT:
             LOG_DEBUG("+ leader threshold event.\n");
-            /**
-             * @todo implement
-             */
+            if (firstRound)
+            {
+                reschedThreshold();
+                firstRound = false;
+                break;
+            }
+            printf("msgCounter ist %i\n", msgCounter);
+            if(otherIPIsHigher){puts("Inf");}else{puts("Sup");}
+            if (otherIPIsHigher && msgCounter < 2)
+            {
+                puts("Ich bin Client");
+                reschedThreshold();
+                break;
+            }
+            else if (!otherIPIsHigher && msgCounter < 2)
+            {
+                puts("Ich bin Coordinator");
+            }
+            else
+            {
+                puts("Ich bin unbestimmt");
+            }
+
+            reschedThreshold();
             break;
         default:
             LOG_WARNING("??? invalid event (%x) ???\n", m.type);
@@ -198,6 +228,26 @@ void rescheduleInterval(void)
     interval_event.event.offset = ELECT_MSG_INTERVAL;
     // (re)schedule event message
     evtimer_add_msg(&evtimer, &interval_event, this_main_pid);
+}
+
+void reschedThreshold(void)
+{
+    // remove existing event
+    evtimer_del(&evtimer, &leader_threshold_event.event);
+    // reset event timer offset
+    leader_threshold_event.event.offset = ELECT_LEADER_THRESHOLD;
+    // (re)schedule event message
+    evtimer_add_msg(&evtimer, &leader_threshold_event, this_main_pid);
+}
+
+void reschedTimeout(void)
+{
+    // remove existing event
+    evtimer_del(&evtimer, &leader_timeout_event.event);
+    // reset event timer offset
+    leader_timeout_event.event.offset = ELECT_LEADER_TIMEOUT;
+    // (re)schedule event message
+    evtimer_add_msg(&evtimer, &leader_timeout_event, this_main_pid);
 }
 
 bool is_addr_bigger(char *str1, char *str2)
