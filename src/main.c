@@ -107,6 +107,16 @@ int main(void)
         return 1;
     }
 
+    ipv6_addr_t thisAddr;
+    get_node_ip_addr(&thisAddr);
+    char thisAddrStr[IPV6_ADDR_MAX_STR_LEN];
+    if (ipv6_addr_to_str(thisAddrStr, &thisAddr, sizeof(thisAddrStr)) == NULL)
+    {
+        LOG_ERROR("%s: failed to convert IP address!\n", __func__);
+        return 1;
+    }
+
+    printf("My addr: %s\n", thisAddrStr); //This works, but the print on the device is lost. It still works!!!!
     while (true)
     {
         msg_t m;
@@ -115,10 +125,16 @@ int main(void)
         {
         case ELECT_INTERVAL_EVENT:
             LOG_DEBUG("+ interval event.\n");
+            if (broadcast_id(&thisAddr) < 0)
+            {
+                printf("%s: failed\n", __func__);
+            }
             rescheduleInterval();
+
             break;
         case ELECT_BROADCAST_EVENT:
-            LOG_DEBUG("+ broadcast event, from [%s]", (char *)m.content.ptr);
+            LOG_DEBUG("+ broadcast event, from [%s]\n", (char *)m.content.ptr);
+            printf("otterAddr: %s\n",  (char *)m.content.ptr);
             /**
              * @todo implement
              */
