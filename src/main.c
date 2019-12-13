@@ -42,6 +42,7 @@ void rescheduleInterval(void);
 void reschedThreshold(void);
 void reschedTimeout(void);
 bool is_addr_bigger(char *str1, char *str2);
+int16_t calculateMovingAverage(int16_t oldAverage, int16_t currentValue);
 
 static msg_t _main_msg_queue[ELECT_NODES_NUM];
 static kernel_pid_t this_main_pid;
@@ -298,4 +299,14 @@ bool is_addr_bigger(char *str1, char *str2)
     {
         return false;
     }
+}
+
+int16_t calculateMovingAverage(int16_t oldAverage, int16_t currentValue)
+{
+    int16_t Xi = oldAverage;
+    int16_t x = currentValue;
+
+    int16_t result = (int16_t)((double)((((16.0 - 1.0) / 16.0) * (double)Xi) + ((1.0 / 16.0) * (double)x)));
+
+    return result;
 }
