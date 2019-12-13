@@ -35,6 +35,7 @@
 #include "elect.h"
 
 void rescheduleInterval(void);
+bool is_addr_bigger(char *str1, char *str2);
 
 static msg_t _main_msg_queue[ELECT_NODES_NUM];
 static kernel_pid_t this_main_pid;
@@ -101,6 +102,8 @@ int setup(void)
 
 int main(void)
 {
+    bool higherIP = false;
+
     /* this should be first */
     if (setup() != 0)
     {
@@ -125,19 +128,21 @@ int main(void)
         {
         case ELECT_INTERVAL_EVENT:
             LOG_DEBUG("+ interval event.\n");
-            if (broadcast_id(&thisAddr) < 0)
+            if (!higherIP)
             {
-                printf("%s: failed\n", __func__);
+                if (broadcast_id(&thisAddr) < 0)
+                {
+                    printf("%s: failed\n", __func__);
+                }
             }
             rescheduleInterval();
-
             break;
         case ELECT_BROADCAST_EVENT:
             LOG_DEBUG("+ broadcast event, from [%s]\n", (char *)m.content.ptr);
-            printf("otterAddr: %s\n",  (char *)m.content.ptr);
-            /**
-             * @todo implement
-             */
+            if (is_addr_bigger(thisAddrStr, (char *)m.content.ptr))
+            {
+                higherIP = true;
+            }
             break;
         case ELECT_LEADER_ALIVE_EVENT:
             LOG_DEBUG("+ leader event.\n");
@@ -193,4 +198,24 @@ void rescheduleInterval(void)
     interval_event.event.offset = ELECT_MSG_INTERVAL;
     // (re)schedule event message
     evtimer_add_msg(&evtimer, &interval_event, this_main_pid);
+}
+
+bool is_addr_bigger(char *str1, char *str2)
+{
+    ipv6_addr_t addr1;
+    ipv6_addr_t addr2;
+
+    ipv6_addr_from_str(&addr1, str1);
+    ipv6_addr_from_str(&addr2, str2);
+
+    int cmp = ipv6_addr_cmp(&addr1, &addr2);
+
+    if (cmp < 0)
+    {
+        return true;
+    }
+    else
+    {
+        return false;
+    }
 }
