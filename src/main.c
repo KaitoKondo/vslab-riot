@@ -34,7 +34,10 @@
 
 #include "elect.h"
 
+void rescheduleInterval(void);
+
 static msg_t _main_msg_queue[ELECT_NODES_NUM];
+static kernel_pid_t this_main_pid;
 
 /**
  * @name event time configuration
@@ -42,14 +45,14 @@ static msg_t _main_msg_queue[ELECT_NODES_NUM];
  */
 static evtimer_msg_t evtimer;
 static evtimer_msg_event_t interval_event = {
-    .event  = { .offset = ELECT_MSG_INTERVAL },
-    .msg    = { .type = ELECT_INTERVAL_EVENT}};
+    .event = {.offset = ELECT_MSG_INTERVAL},
+    .msg = {.type = ELECT_INTERVAL_EVENT}};
 static evtimer_msg_event_t leader_timeout_event = {
-    .event  = { .offset = ELECT_LEADER_TIMEOUT },
-    .msg    = { .type = ELECT_LEADER_TIMEOUT_EVENT}};
+    .event = {.offset = ELECT_LEADER_TIMEOUT},
+    .msg = {.type = ELECT_LEADER_TIMEOUT_EVENT}};
 static evtimer_msg_event_t leader_threshold_event = {
-    .event  = { .offset = ELECT_LEADER_THRESHOLD },
-    .msg    = { .type = ELECT_LEADER_THRESHOLD_EVENT}};
+    .event = {.offset = ELECT_LEADER_THRESHOLD},
+    .msg = {.type = ELECT_LEADER_THRESHOLD_EVENT}};
 /** @} */
 
 /**
@@ -61,26 +64,31 @@ int setup(void)
 {
     LOG_DEBUG("%s: begin\n", __func__);
     /* avoid unused variable error */
-    (void) interval_event;
-    (void) leader_timeout_event;
-    (void) leader_threshold_event;
+    (void)interval_event;
+    (void)leader_timeout_event;
+    (void)leader_threshold_event;
 
     msg_init_queue(_main_msg_queue, ELECT_NODES_NUM);
     kernel_pid_t main_pid = thread_getpid();
+    this_main_pid = main_pid;
 
-    if (net_init(main_pid) != 0) {
+    if (net_init(main_pid) != 0)
+    {
         LOG_ERROR("init network interface!\n");
         return 2;
     }
-    if (coap_init(main_pid) != 0) {
+    if (coap_init(main_pid) != 0)
+    {
         LOG_ERROR("init CoAP!\n");
         return 3;
     }
-    if (sensor_init() != 0) {
+    if (sensor_init() != 0)
+    {
         LOG_ERROR("init sensor!\n");
         return 4;
     }
-    if (listen_init(main_pid) != 0) {
+    if (listen_init(main_pid) != 0)
+    {
         LOG_ERROR("init listen!\n");
         return 5;
     }
@@ -94,19 +102,20 @@ int setup(void)
 int main(void)
 {
     /* this should be first */
-    if (setup() != 0) {
+    if (setup() != 0)
+    {
         return 1;
     }
 
-    while(true) {
+    while (true)
+    {
         msg_t m;
         msg_receive(&m);
-        switch (m.type) {
+        switch (m.type)
+        {
         case ELECT_INTERVAL_EVENT:
             LOG_DEBUG("+ interval event.\n");
-            /**
-             * @todo implement
-             */
+            rescheduleInterval();
             break;
         case ELECT_BROADCAST_EVENT:
             LOG_DEBUG("+ broadcast event, from [%s]", (char *)m.content.ptr);
@@ -133,7 +142,7 @@ int main(void)
              */
             break;
         case ELECT_SENSOR_EVENT:
-            LOG_DEBUG("+ sensor event, value=%s\n",  (char *)m.content.ptr);
+            LOG_DEBUG("+ sensor event, value=%s\n", (char *)m.content.ptr);
             /**
              * @todo implement
              */
@@ -151,10 +160,21 @@ int main(void)
         /* !!! DO NOT REMOVE !!! */
         if ((m.type != ELECT_INTERVAL_EVENT) &&
             (m.type != ELECT_LEADER_TIMEOUT_EVENT) &&
-            (m.type != ELECT_LEADER_THRESHOLD_EVENT)) {
+            (m.type != ELECT_LEADER_THRESHOLD_EVENT))
+        {
             msg_reply(&m, &m);
         }
     }
     /* should never be reached */
     return 0;
+}
+
+void rescheduleInterval(void)
+{
+    // remove existing event
+    evtimer_del(&evtimer, &interval_event.event);
+    // reset event timer offset
+    interval_event.event.offset = ELECT_MSG_INTERVAL;
+    // (re)schedule event message
+    evtimer_add_msg(&evtimer, &interval_event, this_main_pid);
 }
