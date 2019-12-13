@@ -34,6 +34,10 @@
 
 #include "elect.h"
 
+#define STATE_ENTDECKUNG 0
+#define STATE_KOORDINATOR 1
+#define STATE_KLIENT 2
+
 void rescheduleInterval(void);
 void reschedThreshold(void);
 void reschedTimeout(void);
@@ -109,6 +113,8 @@ int main(void)
     bool otherIPIsHigher = false;
     bool firstRound = true;
     int msgCounter = 0;
+    int state = 0;
+    ipv6_addr_t highestAddr = {{0}};
 
     /* this should be first */
     if (setup() != 0)
@@ -134,6 +140,7 @@ int main(void)
         {
         case ELECT_INTERVAL_EVENT:
             LOG_DEBUG("+ interval event.\n");
+            printf("%i", state);
             if (!otherIPIsHigher)
             {
                 if (broadcast_id(&thisAddr) < 0)
@@ -142,7 +149,10 @@ int main(void)
                 }
             }
             msgCounter = 0;
-            rescheduleInterval();
+            if (state == STATE_ENTDECKUNG)
+            {
+                rescheduleInterval();
+            }
             break;
         case ELECT_BROADCAST_EVENT:
             LOG_DEBUG("+ broadcast event, from [%s]\n", (char *)m.content.ptr);
@@ -150,6 +160,13 @@ int main(void)
             {
                 puts("Es liegt nicht an dir, es liegt an mir, aber ich denke nicht das es zwischen uns klppt, ich habe jemand höheren gefunden.");
                 otherIPIsHigher = true;
+            }
+            char highestAddrStr[40];
+            ipv6_addr_to_str(highestAddrStr, &highestAddr, 40);
+            if (is_addr_bigger(highestAddrStr, (char *)m.content.ptr))
+            {
+                ipv6_addr_from_str(&highestAddr, (char *)m.content.ptr);
+                printf("neue höchste Addr %s\n", (char *)m.content.ptr);
             }
             msgCounter++;
             break;
@@ -186,16 +203,29 @@ int main(void)
                 break;
             }
             printf("msgCounter ist %i\n", msgCounter);
-            if(otherIPIsHigher){puts("Inf");}else{puts("Sup");}
+            if (otherIPIsHigher)
+            {
+                puts("Inf");
+            }
+            else
+            {
+                puts("Sup");
+            }
             if (otherIPIsHigher && msgCounter < 2)
             {
                 puts("Ich bin Client");
-                reschedThreshold();
+                state = STATE_KLIENT;
+                if (coap_put_node(highestAddr, thisAddr) == 0)
+                {
+                    printf("Success\n");
+                }
                 break;
             }
             else if (!otherIPIsHigher && msgCounter < 2)
             {
                 puts("Ich bin Coordinator");
+                state = STATE_KOORDINATOR;
+                break;
             }
             else
             {
