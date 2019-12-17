@@ -34,18 +34,25 @@
 
 #include "elect.h"
 
-#define STATE_ENTDECKUNG 0
-#define STATE_KOORDINATOR 1
-#define STATE_KLIENT 2
+#define STATE_DISCOVERY 0
+#define STATE_COORDINATOR 1
+#define STATE_CLIENT 2
 
 void rescheduleInterval(void);
+
 void rescheduleThreshold(void);
+
 void rescheduleTimeout(void);
+
 bool is_addr_bigger(char *str1, char *str2);
+
 int16_t calculateMovingAverage(int16_t oldAverage, int16_t currentValue);
-void addClient(ipv6_addr_t* clientsList, ipv6_addr_t clientIP, int* clientsListCount);
-void clearClients(ipv6_addr_t* clientsList, int* clientsListCount);
-bool addrInList(ipv6_addr_t* clientsList, ipv6_addr_t clientIP, int* clientsListCount);
+
+void addClient(ipv6_addr_t *clientsList, ipv6_addr_t clientIP, int *clientsListCount);
+
+void clearClients(ipv6_addr_t *clientsList, int *clientsListCount);
+
+bool addrInList(ipv6_addr_t *clientsList, ipv6_addr_t clientIP, int *clientsListCount);
 
 static msg_t _main_msg_queue[ELECT_NODES_NUM];
 static kernel_pid_t this_main_pid;
@@ -122,7 +129,7 @@ int main(void)
     ipv6_addr_t highestAddr = {{0}};
     ipv6_addr_t clientsList[8] = {{{0}}};
     int clientsListCount = 0;
-    int16_t mittelwert = 0;
+    int16_t average = 0;
 
     /* this should be first */
     if (setup() != 0)
@@ -138,8 +145,8 @@ int main(void)
         LOG_ERROR("%s: failed to convert IP address!\n", __func__);
         return 1;
     }
-
     printf("My addr: %s\n", thisAddrStr); //This works, but the print on the device is lost. It still works!!!!
+
     while (true)
     {
         msg_t m;
@@ -147,12 +154,13 @@ int main(void)
         switch (m.type)
         {
         case ELECT_INTERVAL_EVENT:
-            LOG_DEBUG("+ interval event.\n");
-            printf("%i", state);
-            if (state == STATE_ENTDECKUNG)
+            LOG_DEBUG("+ ELECT_INTERVAL_EVENT.\n");
+            if (state == STATE_DISCOVERY)
             {
-                if(!otherIPIsHigher)
+                puts("Current State: STATE_DISCOVERY");
+                if (!otherIPIsHigher)
                 {
+                    puts("Broadcaste eigene IP, da keine höherwertigere IP gefunden");
                     if (broadcast_id(&thisAddr) < 0)
                     {
                         printf("%s: failed\n", __func__);
@@ -160,49 +168,46 @@ int main(void)
                 }
                 rescheduleInterval();
                 clearClients(clientsList, &clientsListCount);
-            }else if (state == STATE_KOORDINATOR)
+            }
+            else if (state == STATE_COORDINATOR)
             {
-                if (broadcast_sensor(mittelwert) < 0) {
+                puts("Current State: STATE_COORDINATOR");
+                printf("Broadcaste den Mittelwert: %i\n", average);
+                if (broadcast_sensor(average) < 0)
+                {
                     printf("%s: failed\n", __func__);
                 }
-                mittelwert = sensor_read();
-                puts("works as Koordinator");
-                for (int i = 0; i < clientsListCount; i++){
+                average = sensor_read();
+                puts("Sammle Sensordaten");
+                for (int i = 0; i < clientsListCount; i++)
+                {
                     coap_get_sensor(clientsList[i]);
                 }
                 rescheduleInterval();
             }
+
             msgCounter = 0;
+
+            puts("_________________________________________________________");
+
             break;
 
         case ELECT_BROADCAST_EVENT:
-            LOG_DEBUG("+ broadcast event, from [%s]\n", (char *)m.content.ptr);
+            LOG_DEBUG("+ ELECT_BROADCAST_EVENT, from [%s]\n", (char *)m.content.ptr);
             if (is_addr_bigger(thisAddrStr, (char *)m.content.ptr))
             {
-                if(state == STATE_KOORDINATOR)
+                if (state == STATE_DISCOVERY)
                 {
-                    puts("ICH WURDE GESTÜRZT");
-                    /* send initial `TICK` to start eventloop */
-                    msg_send(&interval_event.msg, this_main_pid);
-                    /* send initial `TICK` to start eventloop */
-                    msg_send(&leader_threshold_event.msg, this_main_pid);
-                    clearClients(clientsList, &clientsListCount);
-                    otherIPIsHigher = false;
-                    firstRound = true;
-                    leaderAlive = true;
-                    msgCounter = 0;
-                    state = STATE_ENTDECKUNG;
-                    memset(&highestAddr, 0, sizeof(ipv6_addr_t));
-                    mittelwert = 0;
-                }
-                else if(state == STATE_ENTDECKUNG)
-                {
-                    puts("höhere IP gefunden.");
+                    puts("Current State: STATE_DISCOVERY");
+                    puts("höherwertigere IP gefunden.");
                     otherIPIsHigher = true;
                 }
-                else if(state == STATE_KLIENT)
+                else if (state == STATE_COORDINATOR)
                 {
-                    puts("DER KÖNIG WURDE GESTÜRZT");
+                    puts("Current State: STATE_COORDINATOR");
+                    printf("Höherwertigere IP: %s gefunden\n", (char *)m.content.ptr);
+                    puts("Führe Reset aus");
+                    puts("<><><><><><>Bleibe in STATE_DISCOVERY<><><><><><>");
                     /* send initial `TICK` to start eventloop */
                     msg_send(&interval_event.msg, this_main_pid);
                     /* send initial `TICK` to start eventloop */
@@ -212,9 +217,28 @@ int main(void)
                     firstRound = true;
                     leaderAlive = true;
                     msgCounter = 0;
-                    state = STATE_ENTDECKUNG;
+                    state = STATE_DISCOVERY;
                     memset(&highestAddr, 0, sizeof(ipv6_addr_t));
-                    mittelwert = 0;
+                    average = 0;
+                }
+                else if (state == STATE_CLIENT)
+                {
+                    puts("Current State: STATE_CLIENT");
+                    puts("Coordinator wechsel");
+                    puts("Führe Reset aus");
+                    puts("<><><><><><>Bleibe in STATE_DISCOVERY<><><><><><>");
+                    /* send initial `TICK` to start eventloop */
+                    msg_send(&interval_event.msg, this_main_pid);
+                    /* send initial `TICK` to start eventloop */
+                    msg_send(&leader_threshold_event.msg, this_main_pid);
+                    clearClients(clientsList, &clientsListCount);
+                    otherIPIsHigher = false;
+                    firstRound = true;
+                    leaderAlive = true;
+                    msgCounter = 0;
+                    state = STATE_DISCOVERY;
+                    memset(&highestAddr, 0, sizeof(ipv6_addr_t));
+                    average = 0;
                 }
             }
             else
@@ -233,19 +257,33 @@ int main(void)
                 printf("neue höchste Addr %s\n", (char *)m.content.ptr);
             }
             msgCounter++;
+
+            puts("_________________________________________________________");
+
             break;
 
         case ELECT_LEADER_ALIVE_EVENT:
-            LOG_DEBUG("+ leader event.\n");
+            LOG_DEBUG("+ ELECT_LEADER_ALIVE_EVENT.\n");
+            puts("Nachricht vom Coordinator erhalten");
             leaderAlive = true;
+
+            puts("_________________________________________________________");
+
             break;
 
         case ELECT_LEADER_TIMEOUT_EVENT:
-            LOG_DEBUG("+ leader timeout event.\n");
-            if(leaderAlive){
+            LOG_DEBUG("+ ELECT_LEADER_TIMEOUT_EVENT.\n");
+            if (leaderAlive)
+            {
+                puts("COORDINATOR ist aktiv");
                 leaderAlive = false;
                 rescheduleTimeout();
-            } else {
+            }
+            else
+            {
+                puts("COORDINATOR ist nicht aktiv");
+                puts("Führe Reset aus");
+                puts("<><><><><><>Bleibe in STATE_DISCOVERY<><><><><><>");
                 /* send initial `TICK` to start eventloop */
                 msg_send(&interval_event.msg, this_main_pid);
                 /* send initial `TICK` to start eventloop */
@@ -255,40 +293,52 @@ int main(void)
                 firstRound = true;
                 leaderAlive = true;
                 msgCounter = 0;
-                state = STATE_ENTDECKUNG;
+                state = STATE_DISCOVERY;
                 memset(&highestAddr, 0, sizeof(ipv6_addr_t));
-                mittelwert = 0;
-            }            
+                average = 0;
+            }
+
+            puts("_________________________________________________________");
+
             break;
 
         case ELECT_NODES_EVENT:
-            LOG_DEBUG("+ nodes event, from [%s].\n", (char *)m.content.ptr);
-            puts("REGISTERING CLIENT!!\n");
+            LOG_DEBUG("+ ELECT_NODES_EVENT, from [%s].\n", (char *)m.content.ptr);
+            puts("Clientanmeldung erhalten\n");
             ipv6_addr_t clientIP;
-            ipv6_addr_from_str(&clientIP, (char*) m.content.ptr);
+            ipv6_addr_from_str(&clientIP, (char *)m.content.ptr);
             addClient(clientsList, clientIP, &clientsListCount);
-            printf("I now have %i clients\n", clientsListCount);
+            printf("Anzahl der Clients in der Liste: %i\n", clientsListCount);
+
+            puts("_________________________________________________________");
+
             break;
 
         case ELECT_SENSOR_EVENT:
-            LOG_DEBUG("+ sensor event, value=%s\n", (char *)m.content.ptr);
+            LOG_DEBUG("+ ELECT_SENSOR_EVENT, value=%s\n", (char *)m.content.ptr);
             int16_t value = (int16_t)strtol((char *)m.content.ptr, NULL, 10);
-            mittelwert = calculateMovingAverage(mittelwert, value);
+            average = calculateMovingAverage(average, value);
+
+            puts("_________________________________________________________");
+
             break;
 
         case ELECT_LEADER_THRESHOLD_EVENT:
-            LOG_DEBUG("+ leader threshold event.\n");
+            LOG_DEBUG("+ ELECT_LEADER_THRESHOLD_EVENT.\n");
             if (firstRound)
             {
                 rescheduleThreshold();
                 firstRound = false;
+
+                puts("_________________________________________________________");
+
                 break;
             }
             printf("msgCounter ist %i\n", msgCounter);
             if (otherIPIsHigher && msgCounter < 2)
             {
-                puts("Ich bin Client");
-                state = STATE_KLIENT;
+                puts("<><><><><><>Wechsle in STATE_CLIENT<><><><><><>");
+                state = STATE_CLIENT;
 
                 char highestAddrStr[40];
                 ipv6_addr_to_str(highestAddrStr, &highestAddr, 40);
@@ -297,28 +347,37 @@ int main(void)
 
                 if (coap_put_node(highestAddr, thisAddr) == 0)
                 {
-                    printf("Klient: %s, an Koordinator: %s",thisAddrStr, highestAddrStr);
+                    printf("Clientanmeldung: %s, an Coordinator: %s", thisAddrStr, highestAddrStr);
                     printf("Success\n");
                 }
 
                 msg_send(&leader_timeout_event.msg, this_main_pid);
+
+                puts("_________________________________________________________");
+
                 break;
             }
             else if (!otherIPIsHigher && msgCounter < 2)
             {
-                puts("Ich bin Coordinator");
-                state = STATE_KOORDINATOR;
+                puts("<><><><><><>Wechsle in STATE_COORDINATOR<><><><><><>");
+                state = STATE_COORDINATOR;
                 rescheduleInterval();
+
+                puts("_________________________________________________________");
+
                 break;
             }
             else
             {
-                puts("Ich bin unbestimmt");
+                puts("<><><><><><>Bleibe in STATE_DISCOVERY<><><><><><>");
             }
 
             msgCounter = 0;
 
             rescheduleThreshold();
+
+            puts("_________________________________________________________");
+
             break;
 
         default:
@@ -397,31 +456,36 @@ int16_t calculateMovingAverage(int16_t oldAverage, int16_t currentValue)
     return result;
 }
 
-void addClient(ipv6_addr_t* clientsList, ipv6_addr_t clientIP, int* clientsListCount){
-    if(!addrInList(clientsList, clientIP, clientsListCount)){
+void addClient(ipv6_addr_t *clientsList, ipv6_addr_t clientIP, int *clientsListCount)
+{
+    if (!addrInList(clientsList, clientIP, clientsListCount))
+    {
         clientsList[*clientsListCount] = clientIP;
         *clientsListCount = *clientsListCount + 1;
-        puts("Stored client IP");
-        if(*clientsListCount < 0)
+        puts("Client IP in Liste hinzugefügt");
+        if (*clientsListCount < 0)
         {
             puts("This will never happen");
         }
     }
     else
     {
-        puts("Kannte ihn bereits");
+        puts("Client bereits in der Liste");
     }
 }
 
-void clearClients(ipv6_addr_t* clientsList, int* clientsListCount){
-        memset(clientsList, 0, sizeof(ipv6_addr_t) * 8);
-        *clientsListCount = 0;
+void clearClients(ipv6_addr_t *clientsList, int *clientsListCount)
+{
+    memset(clientsList, 0, sizeof(ipv6_addr_t) * 8);
+    *clientsListCount = 0;
 }
 
-bool addrInList(ipv6_addr_t* clientsList, ipv6_addr_t clientIP, int* clientsListCount){
-    for(int i = 0; i < *clientsListCount; i++)
+bool addrInList(ipv6_addr_t *clientsList, ipv6_addr_t clientIP, int *clientsListCount)
+{
+    for (int i = 0; i < *clientsListCount; i++)
     {
-        if(ipv6_addr_cmp(clientsList + i, &clientIP) == 0){
+        if (ipv6_addr_cmp(clientsList + i, &clientIP) == 0)
+        {
             return true;
         }
     }
